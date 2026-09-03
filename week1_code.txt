@@ -1,0 +1,141 @@
+# YUVA INTERN - WEEK 1
+# Data Cleaning and Preliminary Analysis with R
+# Dataset: Titanic - Machine Learning from Disaster (Kaggle train.csv)
+
+# 1. Install/load packages
+packages <- c("tidyverse", "janitor", "caret", "scales")
+new_packages <- packages[!(packages %in% installed.packages()[,"Package"])]
+if(length(new_packages)) install.packages(new_packages)
+lapply(packages, library, character.only = TRUE)
+
+# 2. Import data
+# Download train.csv from the official Kaggle Titanic competition page.
+# Put train.csv in the same folder as this script.
+titanic <- read.csv("train.csv", stringsAsFactors = FALSE)
+
+# 3. Initial inspection
+dim(titanic)
+str(titanic)
+summary(titanic)
+
+# 4. Check missing values
+missing_count <- colSums(is.na(titanic))
+missing_percent <- round(100 * missing_count / nrow(titanic), 2)
+missing_report <- data.frame(
+  Variable = names(missing_count),
+  Missing_Count = as.integer(missing_count),
+  Missing_Percent = missing_percent
+)
+missing_report[order(-missing_report$Missing_Count), ]
+
+# 5. Clean column names
+titanic <- janitor::clean_names(titanic)
+
+# 6. Handle missing values
+# Cabin has very high missingness, so it is removed.
+titanic_clean <- titanic %>%
+  select(-cabin) %>%
+  mutate(
+    age = ifelse(is.na(age), median(age, na.rm = TRUE), age),
+    embarked = ifelse(is.na(embarked),
+                      names(sort(table(embarked), decreasing = TRUE))[1],
+                      embarked)
+  )
+
+# 7. Convert variables to appropriate data types
+titanic_clean <- titanic_clean %>%
+  mutate(
+    survived = factor(survived, levels = c(0,1),
+                      labels = c("No", "Yes")),
+    pclass = factor(pclass, levels = c(1,2,3),
+                    labels = c("1st", "2nd", "3rd")),
+    sex = factor(sex),
+    embarked = factor(embarked),
+    family_size = sib_sp + parch + 1
+  )
+
+# 8. Outlier detection using IQR
+iqr_outliers <- function(x) {
+  q1 <- quantile(x, 0.25, na.rm = TRUE)
+  q3 <- quantile(x, 0.75, na.rm = TRUE)
+  iqr <- q3 - q1
+  lower <- q1 - 1.5 * iqr
+  upper <- q3 + 1.5 * iqr
+  list(
+    lower = lower,
+    upper = upper,
+    count = sum(x < lower | x > upper, na.rm = TRUE)
+  )
+}
+
+age_outliers <- iqr_outliers(titanic_clean$age)
+fare_outliers <- iqr_outliers(titanic_clean$fare)
+age_outliers
+fare_outliers
+
+# We do not automatically delete all outliers because extreme fares can
+# represent genuine passengers/tickets. The report documents them first.
+
+# 9. Normalization (Min-Max scaling)
+min_max <- function(x) {
+  (x - min(x, na.rm = TRUE)) /
+    (max(x, na.rm = TRUE) - min(x, na.rm = TRUE))
+}
+
+titanic_clean <- titanic_clean %>%
+  mutate(
+    age_scaled = min_max(age),
+    fare_scaled = min_max(fare)
+  )
+
+# 10. Encoding categorical variables
+# One-hot encoding using model.matrix()
+encoded_data <- model.matrix(
+  ~ sex + pclass + embarked - 1,
+  data = titanic_clean
+)
+encoded_data <- as.data.frame(encoded_data)
+head(encoded_data)
+
+# 11. Descriptive statistics
+summary(titanic_clean$age)
+summary(titanic_clean$fare)
+table(titanic_clean$survived)
+prop.table(table(titanic_clean$survived))
+table(titanic_clean$sex, titanic_clean$survived)
+prop.table(table(titanic_clean$sex, titanic_clean$survived), margin = 1)
+table(titanic_clean$pclass, titanic_clean$survived)
+prop.table(table(titanic_clean$pclass, titanic_clean$survived), margin = 1)
+
+# 12. Correlation of numeric variables
+numeric_data <- titanic_clean %>%
+  select(sib_sp, parch, age, fare, family_size)
+
+cor(numeric_data, use = "complete.obs")
+
+# 13. Visualizations
+ggplot(titanic_clean, aes(x = survived)) +
+  geom_bar() +
+  labs(title = "Passenger Survival Status",
+       x = "Survived", y = "Count")
+
+ggplot(titanic_clean, aes(x = sex, fill = survived)) +
+  geom_bar(position = "dodge") +
+  labs(title = "Survival by Sex",
+       x = "Sex", y = "Count")
+
+ggplot(titanic_clean, aes(x = pclass, fill = survived)) +
+  geom_bar(position = "dodge") +
+  labs(title = "Survival by Passenger Class",
+       x = "Passenger Class", y = "Count")
+
+ggplot(titanic_clean, aes(y = fare)) +
+  geom_boxplot() +
+  labs(title = "Fare Outlier Detection",
+       y = "Fare")
+
+# 14. Save cleaned data
+write.csv(titanic_clean, "titanic_cleaned.csv", row.names = FALSE)
+
+# End of Week 1 task
+
